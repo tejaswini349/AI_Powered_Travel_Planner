@@ -158,40 +158,24 @@ if st.button("Plan My Trip"):
             model = genai.GenerativeModel(model_name="models/gemini-2.0-flash-exp")
             response = model.generate_content(prompt)
 
-            # ✅ Two-column layout: left = travel plan, right = weather
-            col_left, col_right = st.columns([3, 1])
-
-            # Travel Plan
-            with col_left:
+            # ✅ Main travel plan (full width). Weather is shown in the sidebar to avoid overlapping
+            with st.container():
                 st.success("Your Travel Plan:", icon="📌")
                 st.markdown(response.text)
 
-            # Weather Info (display destination as entered and right-align temperature/value)
-            with col_right:
+            # Weather in the sidebar so it stays separate from the Gemini output area
+            with st.sidebar:
+                st.header(f"Weather — {destination}")
                 weather = get_weather(destination)
                 if not weather or weather.get("error"):
                     st.warning(f"Weather lookup failed: {weather.get('error', 'Unknown error')}")
                 else:
-                    # Use the user-provided destination string rather than API-resolved area
-                    st.subheader(f"Weather at {destination}")
-                    st.write(f"Condition: {weather.get('description', 'N/A').capitalize()}")
-
-                    # Right-align the temperature value by using two small columns
-                    t_label_col, t_value_col = st.columns([1, 1])
-                    t_label_col.markdown("**Temperature:**")
-                    t_value_col.markdown(f"**{weather.get('temp_C', 'N/A')} °C**")
-
-                    # Feels like, humidity and wind — label left, value right
-                    f_label_col, f_value_col = st.columns([1, 1])
-                    f_label_col.write("Feels like:")
-                    f_value_col.write(f"{weather.get('feelslike_C', 'N/A')} °C")
-
-                    h_label_col, h_value_col = st.columns([1, 1])
-                    h_label_col.write("Humidity:")
-                    h_value_col.write(f"{weather.get('humidity', 'N/A')}%")
-
-                    w_label_col, w_value_col = st.columns([1, 1])
-                    w_label_col.write("Wind:")
-                    w_value_col.write(f"{weather.get('wind_kmph', 'N/A')} km/h")
+                    # small two-column row inside sidebar to right-align the temperature value
+                    left_col, right_col = st.columns([2, 1])
+                    left_col.write(f"Condition: {weather.get('description', 'N/A').capitalize()}")
+                    right_col.markdown(f"**{weather.get('temp_C', 'N/A')} °C**")
+                    st.write(f"Feels like: {weather.get('feelslike_C', 'N/A')} °C")
+                    st.write(f"Humidity: {weather.get('humidity', 'N/A')}%")
+                    st.write(f"Wind: {weather.get('wind_kmph', 'N/A')} km/h")
     else:
         st.warning("Please enter both source and destination.")
