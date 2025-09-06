@@ -3,3 +3,4 @@ google-generativeai
 requests
 folium
 streamlit-folium
+pandas

@@ -4,6 +4,7 @@ import requests
 import random
 import folium
 from streamlit_folium import st_folium
+import streamlit.components.v1 as components
 
 st.set_page_config(
     page_title="AI Travel Planner",
@@ -13,11 +14,14 @@ st.set_page_config(
 )
 
 # ✅ Configure Google Gemini API
-genai.configure(api_key="AIzaSyDV4WzJV0KQlCAk1cwf1fqC5wW_i4WAyM4")  # replace with your key
+genai.configure(api_key="AIzaSyD2uY-A9CFdTGG_x6KAgl0yzKEJv3czgvg")
 
 # ✅ Initialize session state
 if "submitted" not in st.session_state:
     st.session_state.submitted = False
+
+if "show_map" not in st.session_state:
+    st.session_state.show_map = False
 
 # ✅ Weather function
 @st.cache_data(show_spinner=False)
@@ -92,7 +96,7 @@ def get_hotels_osm(lat, lon, radius=2000):
     except Exception as e:
         return [{"error": str(e)}]
 
-# ✅ Input form (only visible if not submitted)
+# ✅ Input form
 if not st.session_state.submitted:
     st.markdown(
         """
@@ -122,7 +126,7 @@ if not st.session_state.submitted:
         else:
             st.warning("Please enter source, destination, number of persons, and budget")
 
-# ✅ Output section (only visible after submission)
+# ✅ Output section
 if st.session_state.submitted:
     source = st.session_state.source
     destination = st.session_state.destination
@@ -138,16 +142,16 @@ if st.session_state.submitted:
         Include:
         1. Travel Mode Comparison (bike, cab, bus, train, flight).
         2. Food & Rest Stops (restaurants, popular food).
-        3. Best Time to Travel (money saving, avoid traffic).
+        3. Best Time to Travel.
         4. Cheapest vs Fastest.
         5. Tourist Attractions at {destination}, entry fees, timings.
         """
         response = model.generate_content(prompt)
 
-        col1, col2, col3 = st.columns([1,2,1])
+        # ✅ Layout
+        col1, col2, col3 = st.columns([1, 2, 1])
 
         # 🌤 Weather (left)
-       # 🌤 Weather (left)
         with col1:
             st.subheader(f"🌤 Weather at {destination}")
             weather = get_weather(destination)
@@ -160,21 +164,65 @@ if st.session_state.submitted:
                 st.metric("Wind (km/h)", weather.get("wind_kmph", "N/A"))
                 st.write(f"📌 Condition: {weather.get('description', 'N/A')}")
 
-                # ✅ Add map (STATIC → no rerun on click/zoom)
-                lat, lon = get_coordinates(destination)
-                if lat and lon:
-                    m = folium.Map(location=[lat, lon], zoom_start=12)
-                    folium.Marker([lat, lon], tooltip=destination).add_to(m)
-                    st_folium(
-                        m,
-                        width=300,
-                        height=200,
-                        returned_objects=[],   # disable interaction events
-                        feature_group_to_add=None,
-                        key="static_map"       # stable key avoids refresh
-                    )
+            # 🚗 Route Map Popup
+            if st.button("🗺️ Show Route Map"):
+                source_coords = get_coordinates(source)
+                dest_coords = get_coordinates(destination)
 
-        # 📌 Travel Plan (center)
+                if source_coords and dest_coords:
+                    big_map = folium.Map(location=source_coords, zoom_start=7)
+                    folium.Marker(source_coords, tooltip=f"Start: {source}",
+                                  icon=folium.Icon(color="green", icon="play")).add_to(big_map)
+                    folium.Marker(dest_coords, tooltip=f"End: {destination}",
+                                  icon=folium.Icon(color="red", icon="flag")).add_to(big_map)
+                    folium.PolyLine([source_coords, dest_coords],
+                                    color="blue", weight=5, opacity=0.8).add_to(big_map)
+
+                    # Render the map properly (not small iframe)
+                    map_html = big_map.get_root().render()
+
+                    components.html(f"""
+                    <style>
+                    .leaflet-container {{
+                        width: 100% !important;
+                        height: 100% !important;
+                    }}
+                    .map-modal {{
+                        position: fixed;
+                        top: 0; left: 0; right: 0; bottom: 0;
+                        background: rgba(0,0,0,0.6);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        z-index: 9999;
+                    }}
+                    .map-content {{
+                        background: white;
+                        border-radius: 12px;
+                        padding: 10px;
+                        width: 80%;
+                        height: 80%;
+                        position: relative;
+                    }}
+                    .close-btn {{
+                        position: absolute;
+                        top: 10px;
+                        right: 15px;
+                        font-size: 22px;
+                        cursor: pointer;
+                        color: red;
+                    }}
+                    </style>
+                    
+                    <div class="map-modal" onclick="this.remove()">
+                      <div class="map-content" onclick="event.stopPropagation()">
+                        <span class="close-btn" onclick="this.closest('.map-modal').remove()">✖</span>
+                        {map_html}
+                      </div>
+                    </div>
+                    """, height=800)
+
+        # 📌 Travel Plan (middle)
         with col2:
             st.success("📌 Your Travel Plan")
             st.markdown(response.text)
@@ -182,7 +230,6 @@ if st.session_state.submitted:
         # 🏨 Hotels (right)
         with col3:
             st.subheader("🏨 Recommended Hotels")
-            
             lat, lon = get_coordinates(destination)
             if not lat or not lon:
                 st.error("Could not find location coordinates.")
