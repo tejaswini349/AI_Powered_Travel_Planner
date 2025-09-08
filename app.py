@@ -24,6 +24,46 @@ if "show_map" not in st.session_state:
     st.session_state.show_map = False
 
 # =========================
+# 📍 Improved Geocoding
+# =========================
+@st.cache_data(show_spinner=False)
+def get_coordinates(place):
+    """
+    Returns (lat, lon) for a given place name using Nominatim.
+    Tries multiple fallback strategies for reliability.
+    """
+    try:
+        place = place.strip()
+        url = "https://nominatim.openstreetmap.org/search"
+        headers = {"User-Agent": "travel-app"}
+        params = {"q": place, "format": "json", "limit": 1}
+        
+        resp = requests.get(url, params=params, timeout=8, headers=headers)
+        resp.raise_for_status()
+        results = resp.json()
+        if results:
+            return float(results[0]["lat"]), float(results[0]["lon"])
+        
+        # Fallback 1: lowercase
+        params["q"] = place.lower()
+        resp = requests.get(url, params=params, timeout=8, headers=headers)
+        results = resp.json()
+        if results:
+            return float(results[0]["lat"]), float(results[0]["lon"])
+        
+        # Fallback 2: replace spaces with '+'
+        params["q"] = place.replace(" ", "+")
+        resp = requests.get(url, params=params, timeout=8, headers=headers)
+        results = resp.json()
+        if results:
+            return float(results[0]["lat"]), float(results[0]["lon"])
+        
+    except Exception as e:
+        print(f"Geocoding error for '{place}': {e}")
+    
+    return None, None
+
+# =========================
 # 🌤 Weather
 # =========================
 @st.cache_data(show_spinner=False)
@@ -51,23 +91,8 @@ def get_weather(location: str):
         return {"error": "Weather unavailable"}
 
 # =========================
-# 📍 Geocoding
-# =========================
-@st.cache_data(show_spinner=False)
-def get_coordinates(place):
-    try:
-        url = "https://nominatim.openstreetmap.org/search"
-        params = {"q": place, "format": "json", "limit": 1}
-        resp = requests.get(url, params=params, timeout=8, headers={"User-Agent": "travel-app"})
-        resp.raise_for_status()
-        results = resp.json()
-        if results:
-            return float(results[0]["lat"]), float(results[0]["lon"])
-    except:
-        return None, None
-    return None, None
-
 # ✅ Reverse geocoding fallback
+# =========================
 def reverse_geocode(lat, lon):
     try:
         url = "https://nominatim.openstreetmap.org/reverse"
@@ -86,10 +111,10 @@ def reverse_geocode(lat, lon):
     return None
 
 # =========================
-# 🏨 Hotels (Overpass API with phone)
+# 🏨 Hotels (Overpass API)
 # =========================
 @st.cache_data(show_spinner=False)
-def get_hotels_osm(lat, lon, radius=2000):
+def get_hotels_osm(lat, lon, radius=1500,max_hotels=20):
     query = f"""
     [out:json];
     node
@@ -107,7 +132,6 @@ def get_hotels_osm(lat, lon, radius=2000):
         for el in elements:
             tags = el.get("tags", {})
 
-            # ⭐ Build address from OSM tags
             address_parts = [
                 tags.get("addr:housename"),
                 tags.get("addr:housenumber"),
@@ -119,12 +143,9 @@ def get_hotels_osm(lat, lon, radius=2000):
                 tags.get("addr:country"),
             ]
             address = ", ".join([part for part in address_parts if part])
-
-            # ⭐ If missing, fallback to reverse geocode
             if not address:
                 address = reverse_geocode(el["lat"], el["lon"]) or "Address not available"
 
-            # ⭐ Phone number
             phone = tags.get("contact:phone") or tags.get("phone") or "Not available"
 
             hotels.append({
@@ -198,7 +219,7 @@ if st.session_state.submitted:
 
         col1, col2, col3 = st.columns([1, 2, 1])
 
-        # 🌤 Weather (left)
+        # 🌤 Weather & Map
         with col1:
             st.subheader(f"🌤 Weather at {destination}")
             weather = get_weather(destination)
@@ -215,7 +236,9 @@ if st.session_state.submitted:
             if st.button("🗺️ Show Route Map"):
                 source_coords = get_coordinates(source)
                 dest_coords = get_coordinates(destination)
-                if source_coords and dest_coords:
+                if not source_coords or not dest_coords:
+                    st.error("Could not find coordinates for source or destination. Please check the place names.")
+                else:
                     big_map = folium.Map(location=source_coords, zoom_start=7)
                     folium.Marker(source_coords, tooltip=f"Start: {source}",
                                   icon=folium.Icon(color="green", icon="play")).add_to(big_map)
@@ -265,17 +288,17 @@ if st.session_state.submitted:
                     </div>
                     """, height=800)
 
-        # 📌 Travel Plan (middle)
+        # 📌 Travel Plan
         with col2:
             st.success("📌 Your Travel Plan")
             st.markdown(response.text)
 
-        # 🏨 Hotels (right)
+        # 🏨 Hotels
         with col3:
             st.subheader("🏨 Recommended Hotels")
             lat, lon = get_coordinates(destination)
             if not lat or not lon:
-                st.error("Could not find location coordinates.")
+                st.error("Could not find location coordinates. Hotels cannot be fetched.")
             else:
                 hotels = get_hotels_osm(lat, lon)
                 if not hotels:
