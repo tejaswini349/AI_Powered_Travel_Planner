@@ -23,7 +23,9 @@ if "submitted" not in st.session_state:
 if "show_map" not in st.session_state:
     st.session_state.show_map = False
 
-# ✅ Weather function
+# =========================
+# 🌤 Weather
+# =========================
 @st.cache_data(show_spinner=False)
 def get_weather(location: str):
     from urllib.parse import quote
@@ -48,7 +50,9 @@ def get_weather(location: str):
     except Exception:
         return {"error": "Weather unavailable"}
 
-# ✅ Get coordinates from OpenStreetMap (Nominatim)
+# =========================
+# 📍 Geocoding
+# =========================
 @st.cache_data(show_spinner=False)
 def get_coordinates(place):
     try:
@@ -63,7 +67,27 @@ def get_coordinates(place):
         return None, None
     return None, None
 
-# ✅ Fetch Hotels from OpenStreetMap (Overpass API)
+# ✅ Reverse geocoding fallback
+def reverse_geocode(lat, lon):
+    try:
+        url = "https://nominatim.openstreetmap.org/reverse"
+        params = {"lat": lat, "lon": lon, "format": "json"}
+        resp = requests.get(url, params=params, timeout=8, headers={"User-Agent": "travel-app"})
+        if resp.status_code == 200:
+            data = resp.json()
+            addr = data.get("address", {})
+            city = addr.get("city") or addr.get("town") or addr.get("village")
+            state = addr.get("state")
+            country = addr.get("country")
+            short_address = ", ".join([p for p in [city, state, country] if p])
+            return short_address if short_address else data.get("display_name")
+    except:
+        return None
+    return None
+
+# =========================
+# 🏨 Hotels (Overpass API with phone)
+# =========================
 @st.cache_data(show_spinner=False)
 def get_hotels_osm(lat, lon, radius=2000):
     query = f"""
@@ -81,22 +105,44 @@ def get_hotels_osm(lat, lon, radius=2000):
 
         hotels = []
         for el in elements:
-            name = el.get("tags", {}).get("name", "Unnamed Hotel")
-            rating = round(random.uniform(3.0, 5.0), 1)
-            reviews = random.randint(10, 500)
+            tags = el.get("tags", {})
+
+            # ⭐ Build address from OSM tags
+            address_parts = [
+                tags.get("addr:housename"),
+                tags.get("addr:housenumber"),
+                tags.get("addr:street"),
+                tags.get("addr:suburb"),
+                tags.get("addr:city"),
+                tags.get("addr:state"),
+                tags.get("addr:postcode"),
+                tags.get("addr:country"),
+            ]
+            address = ", ".join([part for part in address_parts if part])
+
+            # ⭐ If missing, fallback to reverse geocode
+            if not address:
+                address = reverse_geocode(el["lat"], el["lon"]) or "Address not available"
+
+            # ⭐ Phone number
+            phone = tags.get("contact:phone") or tags.get("phone") or "Not available"
+
             hotels.append({
-                "name": name,
+                "name": tags.get("name", "Unnamed Hotel"),
                 "lat": el["lat"],
                 "lon": el["lon"],
-                "rating": rating,
-                "reviews": reviews,
-                "address": el.get("tags", {}).get("addr:full", "Address not available")
+                "rating": round(random.uniform(3.0, 5.0), 1),
+                "reviews": random.randint(10, 500),
+                "address": address,
+                "phone": phone
             })
         return hotels
     except Exception as e:
         return [{"error": str(e)}]
 
-# ✅ Input form
+# =========================
+# 🖥️ UI
+# =========================
 if not st.session_state.submitted:
     st.markdown(
         """
@@ -126,7 +172,9 @@ if not st.session_state.submitted:
         else:
             st.warning("Please enter source, destination, number of persons, and budget")
 
-# ✅ Output section
+# =========================
+# 📌 Output Section
+# =========================
 if st.session_state.submitted:
     source = st.session_state.source
     destination = st.session_state.destination
@@ -148,7 +196,6 @@ if st.session_state.submitted:
         """
         response = model.generate_content(prompt)
 
-        # ✅ Layout
         col1, col2, col3 = st.columns([1, 2, 1])
 
         # 🌤 Weather (left)
@@ -164,11 +211,10 @@ if st.session_state.submitted:
                 st.metric("Wind (km/h)", weather.get("wind_kmph", "N/A"))
                 st.write(f"📌 Condition: {weather.get('description', 'N/A')}")
 
-            # 🚗 Route Map Popup
+            # 🚗 Route Map
             if st.button("🗺️ Show Route Map"):
                 source_coords = get_coordinates(source)
                 dest_coords = get_coordinates(destination)
-
                 if source_coords and dest_coords:
                     big_map = folium.Map(location=source_coords, zoom_start=7)
                     folium.Marker(source_coords, tooltip=f"Start: {source}",
@@ -177,10 +223,7 @@ if st.session_state.submitted:
                                   icon=folium.Icon(color="red", icon="flag")).add_to(big_map)
                     folium.PolyLine([source_coords, dest_coords],
                                     color="blue", weight=5, opacity=0.8).add_to(big_map)
-
-                    # Render the map properly (not small iframe)
                     map_html = big_map.get_root().render()
-
                     components.html(f"""
                     <style>
                     .leaflet-container {{
@@ -244,5 +287,6 @@ if st.session_state.submitted:
                         else:
                             st.markdown(
                                 f"**{h['name']}**  ⭐ {h['rating']} ({h['reviews']} reviews)  \n"
-                                f"📍 {h['address']}"
+                                f"📍 {h['address']}  \n"
+                                f"📞 {h['phone']}"
                             )
